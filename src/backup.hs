@@ -55,7 +55,7 @@ sync real server folder absSrc dst excludes =
     printCmd cmd >> if real then system cmd >>= checkPassed else return True
     where cmd = "rsync -va --delete --delete-excluded --exclude-from="
                 ++ excludes ++ " " ++ absSrc
-                ++ " narens@192.168.2.5:" ++ folder ++ "/" ++ dst
+                ++ " narens@" ++ server ++ ":" ++ folder ++ "/" ++ dst
 
 makeHardLinkCopy real server folder src dst = do
   e <- checkExists real server (src')
