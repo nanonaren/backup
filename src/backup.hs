@@ -1,3 +1,8 @@
+{-
+Inspired totally by (because it works charmingly well!):
+http://www.mikerubel.org/computers/rsync_snapshots/
+-}
+
 module Main
     (
     ) where
@@ -11,22 +16,25 @@ import System.Environment (getArgs)
 import HSH
 import System.FilePath
 import Data.List (foldl')
+import System.Directory (getHomeDirectory)
 
 arguments =
     [
      Arg "dryrun" (Just 'd') (Just "dryrun") Nothing
        "Do a dry a run instead and print what will be done",
      Arg "server" (Just 's') (Just "server")
-       (argDataRequired "server address" ArgtypeString) "Address of server",
+       (argDataRequired "HOSTNAME" ArgtypeString) "Address of server",
+     Arg "user" (Just 'e') (Just "user")
+       (argDataRequired "USERNAME" ArgtypeString) "Username",
      Arg "folder" (Just 'f') (Just "folder")
-       (argDataRequired "path" ArgtypeString) "Absolute path of backup folder on destination",
+       (argDataRequired "PATH" ArgtypeString) "Absolute path of backup folder on destination",
      Arg "src" (Just 'r') (Just "src")
-       (argDataRequired "path" ArgtypeString) "Absolute path to source folder",
+       (argDataRequired "PATH" ArgtypeString) "Absolute path to source folder",
      Arg "exclude" (Just 'e') (Just "exclude")
-       (argDataRequired "file" ArgtypeString) "Path to exclude file",
-     Arg "schedule" (Just 'u') (Just "schedule")
-       (argDataRequired "num per week:num per month" ArgtypeString)
-       "The schedule to use"
+       (argDataRequired "FILE" ArgtypeString) "Path to exclude file",
+     Arg "numHourly" (Just 'u') (Just "numHourly")
+       (argDataRequired "NUM" ArgtypeInt)
+       "Number of hourly backups to keep"
     ]
 
 data Backup = Backup
@@ -36,7 +44,8 @@ data Backup = Backup
       folder :: FilePath,
       srcFolder :: FilePath,
       exclude :: FilePath,
-      dryrun :: Bool
+      dryrun :: Bool,
+      numHourly :: Int
     }
 
 type BSt = StateT Backup IO
@@ -44,7 +53,7 @@ type Action = (Where,String)
 type Actions = [Action]
 
 data Where = Remote | Local | Nowhere deriving (Show)
-data Status = Okay | Error | DryRun deriving (Show)
+data Status = Okay | Error | DryRun deriving (Show,Eq)
 
 sample = Backup "narens" "192.168.2.3" "/home/narens/junk" "/home/narens/Desktop/junk" "/home/narens/Desktop/backup_exclude" False
 
@@ -59,24 +68,21 @@ main = do
                  folder = getRequiredArg ags "folder",
                  srcFolder = getRequiredArg ags "src",
                  exclude = getRequiredArg ags "exclude",
-                 dryrun = gotArg ags "dryrun"
+                 dryrun = gotArg ags "dryrun",
+                 numHourly = getRequiredArg ags "numHourly"
                }
-  return ()
-{-
+  statusf <- fmap (</> ".backup_status") getHomeDirectory
   --check if a backup is running already
   running <- fmap (elem "RUNNING".words) $
-             readFile "~/.backup_status"
-  let real = atype == "real"
-  --check destination
-  b <- checkExists real server (folder ++ "/SERVER_EXISTENCE_DIR")
+             readFile statusf
   if not running
     then
-      writeFile "~/.backup_status" "RUNNING" >>
-      run real server folder absSrc excludes num >>= \r ->
-      writeFile "~/.backup_status" "DONE" >> return r
+      writeFile statusf "RUNNING" >>
+      fmap (==Okay) (evalStateT (exec runSync) backup) >>= \r ->
+      writeFile statusf "DONE" >> return r
     else
       putStrLn "Already Running" >> return False
--}
+
 
 {-
 --delete oldest hour
@@ -85,16 +91,18 @@ main = do
 --sync
 --touch
 -}
-runSync numHourly = do
+runSync = do
+  numH <- gets numHourly
+  let fol x = "hourly." ++ show x
+      chk = checkExists "SERVER_EXISTENCE_DIR"
+      del = delete (fol (numH -1))
+      mvs = foldl' (\c (a,b) -> c <*> move (fol a) (fol b)) (return []) $
+            zip (reverse [1..numH-2]) (reverse [2..numH-1])
+      link = makeHardLinkCopy (fol 0) (fol 1)
+
   (chk <*> del <*> mvs <*> link) `at` Remote
    <*> sync (fol 0) `at` Local
    <*> touch (fol 0) `at` Remote
-    where fol x = "hourly." ++ show x
-          chk = checkExists "SERVER_EXISTENCE_DIR"
-          del = delete (fol (numHourly -1))
-          mvs = foldl' (\c (a,b) -> c <*> move (fol a) (fol b)) (return []) $
-                zip (reverse [1..numHourly-2]) (reverse [2..numHourly-1])
-          link = makeHardLinkCopy (fol 0) (fol 1)
 
 sync dest = do
   ex <- gets exclude
