@@ -79,20 +79,22 @@ main = do
 -}
 
 {-
-run real server folder absSrc excludes numHourly = do
-  --delete oldest hour
-  delete real server folder (fol (numHourly -1))
-  --move n-1 to n
-  mapM_ (\(a,b) -> shift real server folder (fol a) (fol b)) $
-        zip (reverse [1..numHourly-2]) (reverse [2..numHourly-1])
-  --make hard link of latest
-  makeHardLinkCopy real server folder (fol 0) (fol 1)
-  --sync
-  sync real server folder absSrc (fol 0) excludes
-  --touch
-  touch real server folder (fol 0)
-    where fol x = "hourly." ++ show x
+--delete oldest hour
+--move n-1 to n
+--make hard link of latest
+--sync
+--touch
 -}
+runSync numHourly = do
+  (chk <*> del <*> mvs <*> link) `at` Remote
+   <*> sync (fol 0) `at` Local
+   <*> touch (fol 0) `at` Remote
+    where fol x = "hourly." ++ show x
+          chk = checkExists "SERVER_EXISTENCE_DIR"
+          del = delete (fol (numHourly -1))
+          mvs = foldl' (\c (a,b) -> c <*> move (fol a) (fol b)) (return []) $
+                zip (reverse [1..numHourly-2]) (reverse [2..numHourly-1])
+          link = makeHardLinkCopy (fol 0) (fol 1)
 
 sync dest = do
   ex <- gets exclude
@@ -108,17 +110,16 @@ sync dest = do
 makeHardLinkCopy src dst = do
   fol <- gets folder
   let cp = create $ "cp -al " ++ (fol </> src) ++ " " ++ (fol </> dst)
-  checkExists src <*> cp
+  cp `on` checkExists src
 
 touch name = do
   fol <- gets folder
   create $ "touch " ++ (fol </> name)
 
-shift src dst = checkExists src <*> move src dst
-
 move src dest = do
   fol <- gets folder
-  create $ "mv " ++ (fol </> src) ++ " " ++ (fol </> dest)
+  let mv = create $ "mv -u " ++ (fol </> src) ++ " " ++ (fol </> dest)
+  mv `on` checkExists src
 
 delete name = do
   fol <- gets folder
@@ -128,8 +129,18 @@ checkExists name = do
   fol <- gets folder
   create $ "[ -e " ++ (fol </> name) ++ " ]"
 
+infixl 2 `at`
 at :: BSt Actions -> Where -> BSt Actions
 at a w = fmap (map (\(_,c) -> (w,c))) a
+
+--do act on cond otherwise true
+--There should only be one action in each
+--sorry, I know its ugly
+on act cond = do
+  (_,cm) <- fmap last cond
+  (_,am) <- fmap head act
+  let cmd = cm ++ " && " ++ am ++ " || true" 
+  create cmd
 
 exec :: BSt Actions -> BSt Status
 exec a = do
@@ -151,11 +162,12 @@ command Local cmd = return (cmd ++ " > /dev/null")
 command Remote cmd = do
   usr <- gets user
   srv <- gets server
-  return $ "ssh " ++ usr ++ "@" ++ srv ++ " " ++ cmd ++ " > /dev/null"
+  return $ "ssh " ++ usr ++ "@" ++ srv ++ " '" ++ cmd ++ "' > /dev/null"
 
 create :: String -> BSt Actions
 create cmd = return [(Nowhere,cmd)]
 
+infixl 1 <*>
 (<*>) :: BSt Actions -> BSt Actions -> BSt Actions
 (<*>) ma mb = liftM2 (++) ma mb
 
