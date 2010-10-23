@@ -3,40 +3,77 @@ module Main
     ) where
 
 import System.Process
-import System.Environment (getArgs)
 import GHC.IO.Exception
-import Control.Monad (when)
+import Control.Monad
+import Control.Monad.State
+import System.Console.ParseArgs
+import System.Environment (getArgs)
+import HSH
+
+arguments =
+    [
+     Arg "dryrun" (Just 'd') (Just "dryrun") Nothing
+       "Do a dry a run instead and print what will be done",
+     Arg "server" (Just 's') (Just "server")
+       (argDataRequired "server address" ArgtypeString) "Address of server",
+     Arg "folder" (Just 'f') (Just "folder")
+       (argDataRequired "path" ArgtypeString) "Absolute path of backup folder on destination",
+     Arg "src" (Just 'r') (Just "src")
+       (argDataRequired "path" ArgtypeString) "Absolute path to source folder",
+     Arg "exclude" (Just 'e') (Just "exclude")
+       (argDataRequired "file" ArgtypeString) "Path to exclude file",
+     Arg "schedule" (Just 'u') (Just "schedule")
+       (argDataRequired "num per week:num per month" ArgtypeString)
+       "The schedule to use"
+    ]
+
+data Backup = Backup
+    {
+      user :: String,
+      server :: String,
+      folder :: FilePath,
+      srcFolder :: FilePath,
+      exclude :: FilePath,
+      dryrun :: Bool
+    }
+
+type BSt = StateT Backup IO
+
+data Status = Okay | Error | DryRun deriving (Show)
+
+sample = Backup "narens" "192.168.2.3" "/home/narens/junk" "/home/narens/Desktop/junk" "/home/narens/Desktop/backup_exclude" False
+
+runSample f = evalStateT f sample
 
 main = do
-  atype <- fmap (!!0) getArgs
-  server <- fmap (!!1) getArgs
-  folder <- fmap (!!2) getArgs
-  absSrc <- fmap (!!3) getArgs
-  excludes <- fmap (!!4) getArgs
-  num <- fmap (read.(!!5)) getArgs
-
+  ags <- parseArgsIO ArgsComplete arguments
+  let backup = Backup
+               {
+                 user = getRequiredArg ags "user",
+                 server = getRequiredArg ags "server",
+                 folder = getRequiredArg ags "folder",
+                 srcFolder = getRequiredArg ags "src",
+                 exclude = getRequiredArg ags "exclude",
+                 dryrun = gotArg ags "dryrun"
+               }
+  return ()
+{-
   --check if a backup is running already
   running <- fmap (elem "RUNNING".words) $
-             readFile "/home/narens/Desktop/backup_status"
+             readFile "~/.backup_status"
   let real = atype == "real"
   --check destination
   b <- checkExists real server (folder ++ "/SERVER_EXISTENCE_DIR")
   if not running
     then
-      writeFile "/home/narens/Desktop/backup_status" "RUNNING" >>
+      writeFile "~/.backup_status" "RUNNING" >>
       run real server folder absSrc excludes num >>= \r ->
-      writeFile "/home/narens/Desktop/backup_status" "DONE" >> return r
+      writeFile "~/.backup_status" "DONE" >> return r
     else
       putStrLn "Already Running" >> return False
-
-{-
-runHigher server folder prefix num = do
-  delete server folder (fol prefix (num-1))
-  mapM_ (\(a,b) -> shift server folder (fol prefix a) (fol prefix b)) $
-        zip (reverse [0..num-2]) (reverse [1..num-1])
-  makeHardLinkCopy server folder (fol "hourly" 0) (fol prefix 1)
 -}
 
+{-
 run real server folder absSrc excludes numHourly = do
   --delete oldest hour
   delete real server folder (fol (numHourly -1))
@@ -84,11 +121,21 @@ delete real server folder name =
     where cmd = "ssh " ++ server ++ " 'rm -rf " ++ folder
                 ++ "/" ++ name ++ "'"
 
-checkExists real server folder =
+checkExists :: BSt Bool
+checkExists = do
     printCmd cmd >> if real then system cmd >>= checkPassed else return True
     where cmd = "ssh " ++ server ++ " '[ -d " ++ folder ++ " ]'"
+-}
 
-printCmd cmd = putStrLn cmd
-
-checkPassed ExitSuccess = return True
-checkPassed _ = return False
+exec :: String -> BSt Status
+exec cmd = do
+  liftIO.putStrLn $ "RUNNING: " ++ cmd
+  dry <- gets dryrun
+  usr <- gets user
+  srv <- gets server
+  let cmd' = "ssh " ++ usr ++ "@" ++ srv ++ " " ++ cmd ++ " > /dev/null"
+  if dry
+    then return DryRun
+    else liftIO (fmap fromBool $ run cmd')
+    where fromBool True = Okay
+          fromBool False = Error
