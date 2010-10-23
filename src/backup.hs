@@ -9,6 +9,7 @@ import Control.Monad.State
 import System.Console.ParseArgs
 import System.Environment (getArgs)
 import HSH
+import System.FilePath
 
 arguments =
     [
@@ -115,25 +116,24 @@ move real server folder nameSrc nameDst =
     where cmd = "ssh " ++ server ++ " 'mv " ++ src ++ " " ++ dst ++ "'"
           src = folder ++ "/" ++ nameSrc
           dst = folder ++ "/" ++ nameDst
-
-delete real server folder name =
-    printCmd cmd >> if real then system cmd >>= checkPassed else return True
-    where cmd = "ssh " ++ server ++ " 'rm -rf " ++ folder
-                ++ "/" ++ name ++ "'"
-
-checkExists :: BSt Bool
-checkExists = do
-    printCmd cmd >> if real then system cmd >>= checkPassed else return True
-    where cmd = "ssh " ++ server ++ " '[ -d " ++ folder ++ " ]'"
 -}
+
+delete name = do
+  fol <- gets folder
+  exec $ "rm -rf " ++ (fol </> name)
+
+checkExists :: BSt Status
+checkExists = do
+  fol <- gets folder
+  exec $ "[ -d " ++ fol ++ " ]"
 
 exec :: String -> BSt Status
 exec cmd = do
-  liftIO.putStrLn $ "RUNNING: " ++ cmd
   dry <- gets dryrun
   usr <- gets user
   srv <- gets server
   let cmd' = "ssh " ++ usr ++ "@" ++ srv ++ " " ++ cmd ++ " > /dev/null"
+  liftIO.putStrLn $ "RUNNING: " ++ cmd'
   if dry
     then return DryRun
     else liftIO (fmap fromBool $ run cmd')
