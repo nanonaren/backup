@@ -10,6 +10,7 @@ import System.Console.ParseArgs
 import System.Environment (getArgs)
 import HSH
 import System.FilePath
+import Data.List (foldl')
 
 arguments =
     [
@@ -39,7 +40,10 @@ data Backup = Backup
     }
 
 type BSt = StateT Backup IO
+type Action = (Where,String)
+type Actions = [Action]
 
+data Where = Remote | Local | Nowhere deriving (Show)
 data Status = Okay | Error | DryRun deriving (Show)
 
 sample = Backup "narens" "192.168.2.3" "/home/narens/junk" "/home/narens/Desktop/junk" "/home/narens/Desktop/backup_exclude" False
@@ -88,54 +92,77 @@ run real server folder absSrc excludes numHourly = do
   --touch
   touch real server folder (fol 0)
     where fol x = "hourly." ++ show x
-
-sync real server folder absSrc dst excludes =
-    printCmd cmd >> if real then system cmd >>= checkPassed else return True
-    where cmd = "rsync -va --delete --delete-excluded --exclude-from="
-                ++ excludes ++ " " ++ absSrc
-                ++ " narens@" ++ server ++ ":" ++ folder ++ "/" ++ dst
-
-makeHardLinkCopy real server folder src dst = do
-  e <- checkExists real server (src')
-  if e then printCmd cmd >> (if real then system cmd >>=
-     checkPassed else return True) else return True
-    where cmd = "ssh " ++ server ++ " 'cp -al " ++ src' ++ " " ++ dst' ++ "'"
-          src' = folder ++ "/" ++ src
-          dst' = folder ++ "/" ++ dst
-
-touch real server folder name =
-    printCmd cmd >> if real then system cmd >>= checkPassed else return True
-    where cmd = "ssh " ++ server ++ " 'touch " ++ folder ++ "/" ++ name ++ "'"
-
-shift real server folder src dst = do
-  e <- checkExists real server (folder ++ "/" ++ src)
-  if e then move real server folder src dst else return True
-
-move real server folder nameSrc nameDst =
-    printCmd cmd >> if real then system cmd >>= checkPassed else return True
-    where cmd = "ssh " ++ server ++ " 'mv " ++ src ++ " " ++ dst ++ "'"
-          src = folder ++ "/" ++ nameSrc
-          dst = folder ++ "/" ++ nameDst
 -}
+
+sync dest = do
+  ex <- gets exclude
+  src <- gets srcFolder
+  srvr <- gets server
+  usr <- gets user
+  fol <- gets folder
+  let cmd = "rsync -vaz --delete --delete-excluded --exclude-from="
+            ++ ex ++ " " ++ addTrailingPathSeparator src ++ " "
+            ++ usr ++ "@" ++ srvr ++ ":" ++ (fol </> dest)
+  create cmd
+
+makeHardLinkCopy src dst = do
+  fol <- gets folder
+  let cp = create $ "cp -al " ++ (fol </> src) ++ " " ++ (fol </> dst)
+  checkExists src <*> cp
+
+touch name = do
+  fol <- gets folder
+  create $ "touch " ++ (fol </> name)
+
+shift src dst = checkExists src <*> move src dst
+
+move src dest = do
+  fol <- gets folder
+  create $ "mv " ++ (fol </> src) ++ " " ++ (fol </> dest)
 
 delete name = do
   fol <- gets folder
-  exec $ "rm -rf " ++ (fol </> name)
+  create $ "rm -rf " ++ (fol </> name)
 
-checkExists :: BSt Status
-checkExists = do
+checkExists name = do
   fol <- gets folder
-  exec $ "[ -d " ++ fol ++ " ]"
+  create $ "[ -e " ++ (fol </> name) ++ " ]"
 
-exec :: String -> BSt Status
-exec cmd = do
+at :: BSt Actions -> Where -> BSt Actions
+at a w = fmap (map (\(_,c) -> (w,c))) a
+
+exec :: BSt Actions -> BSt Status
+exec a = do
+  acts <- a
+  foldl' (\m act -> m <> exec' act) (return Okay) acts
+exec' (loc,cmd) = do
   dry <- gets dryrun
-  usr <- gets user
-  srv <- gets server
-  let cmd' = "ssh " ++ usr ++ "@" ++ srv ++ " " ++ cmd ++ " > /dev/null"
-  liftIO.putStrLn $ "RUNNING: " ++ cmd'
+  cmd' <- command loc cmd
+  liftIO.putStrLn $ "RUNNING (" ++ show loc ++ "): " ++ cmd'
   if dry
     then return DryRun
     else liftIO (fmap fromBool $ run cmd')
     where fromBool True = Okay
           fromBool False = Error
+
+command Nowhere cmd = do
+  error $ "NO LOCATION SPECIFIED FOR: " ++ cmd
+command Local cmd = return (cmd ++ " > /dev/null")
+command Remote cmd = do
+  usr <- gets user
+  srv <- gets server
+  return $ "ssh " ++ usr ++ "@" ++ srv ++ " " ++ cmd ++ " > /dev/null"
+
+create :: String -> BSt Actions
+create cmd = return [(Nowhere,cmd)]
+
+(<*>) :: BSt Actions -> BSt Actions -> BSt Actions
+(<*>) ma mb = liftM2 (++) ma mb
+
+(<>) :: BSt Status -> BSt Status -> BSt Status
+(<>) ma mb = do
+  resA <- ma
+  case resA of
+    Okay -> mb
+    Error -> return Error
+    DryRun -> mb
