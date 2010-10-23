@@ -73,8 +73,7 @@ main = do
                }
   statusf <- fmap (</> ".backup_status") getHomeDirectory
   --check if a backup is running already
-  running <- fmap (elem "RUNNING".words) $
-             readFile statusf
+  running <- fmap (elem "RUNNING".words) $ readFile statusf
   if not running
     then
       writeFile statusf "RUNNING" >>
