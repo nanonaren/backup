@@ -5,6 +5,7 @@ http://www.mikerubel.org/computers/rsync_snapshots/
 
 module Main
     (
+      main
     ) where
 
 import System.Process
@@ -24,7 +25,7 @@ arguments =
        "Do a dry a run instead and print what will be done",
      Arg "server" (Just 's') (Just "server")
        (argDataRequired "HOSTNAME" ArgtypeString) "Address of server",
-     Arg "user" (Just 'e') (Just "user")
+     Arg "user" (Just 'x') (Just "user")
        (argDataRequired "USERNAME" ArgtypeString) "Username",
      Arg "folder" (Just 'f') (Just "folder")
        (argDataRequired "PATH" ArgtypeString) "Absolute path of backup folder on destination",
