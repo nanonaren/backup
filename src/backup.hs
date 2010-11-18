@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-
 Inspired totally by (because it works charmingly well!):
 http://www.mikerubel.org/computers/rsync_snapshots/
@@ -12,77 +13,60 @@ import System.Process
 import GHC.IO.Exception
 import Control.Monad
 import Control.Monad.State
-import System.Console.ParseArgs
-import System.Environment (getArgs)
+import System.Console.CmdArgs
 import HSH
 import System.FilePath
 import Data.List (foldl')
 import System.Directory (getHomeDirectory)
 
-arguments =
-    [
-     Arg "dryrun" (Just 'd') (Just "dryrun") Nothing
-       "Do a dry a run instead and print what will be done",
-     Arg "server" (Just 's') (Just "server")
-       (argDataRequired "HOSTNAME" ArgtypeString) "Address of server",
-     Arg "user" (Just 'x') (Just "user")
-       (argDataRequired "USERNAME" ArgtypeString) "Username",
-     Arg "folder" (Just 'f') (Just "folder")
-       (argDataRequired "PATH" ArgtypeString) "Absolute path of backup folder on destination",
-     Arg "src" (Just 'r') (Just "src")
-       (argDataRequired "PATH" ArgtypeString) "Absolute path to source folder",
-     Arg "exclude" (Just 'e') (Just "exclude")
-       (argDataRequired "FILE" ArgtypeString) "Path to exclude file",
-     Arg "numHourly" (Just 'u') (Just "numHourly")
-       (argDataRequired "NUM" ArgtypeInt)
-       "Number of hourly backups to keep"
-    ]
-
-data Backup = Backup
+data Options = Options
     {
-      user :: String,
-      server :: String,
-      folder :: FilePath,
-      srcFolder :: FilePath,
-      exclude :: FilePath,
       dryrun :: Bool,
+      server :: String,
+      user :: String,
+      bakFolder :: FilePath,
+      src :: [FilePath],
+      exclude :: FilePath,
       numHourly :: Int
-    }
+    } deriving (Show,Data,Typeable)
 
-type BSt = StateT Backup IO
+opts = Options
+  {
+    dryrun = def &= help "Show the commands that will be executed",
+    server = def &= help "Server address" &= typ "ADDRESS",
+    user = def &= help "Username at server" &= typ "NAME",
+    bakFolder = def &= help "Absolute path to backup folder at server" &= typDir,
+    src = def &= help "Absolute path to source folder. Use this flag \
+                        \multiple times for multiple folders" &= typDir,
+    exclude = def &= help "Rsync excludes file" &= typFile,
+    numHourly = def &= help "Number of backups to keep" &= typ "NUM"
+  } &= program "backup"
+    &= summary "Clean and simple Rsync backup"
+    &= details ["Visit http://github.com/nanonaren for source."]
+
+type BSt = StateT Options IO
 type Action = (Where,String)
 type Actions = [Action]
 
 data Where = Remote | Local | Nowhere deriving (Show)
 data Status = Okay | Error | DryRun deriving (Show,Eq)
 
-sample = Backup "narens" "192.168.2.3" "/home/narens/junk" "/home/narens/Desktop/junk" "/home/narens/Desktop/backup_exclude" False
-
-runSample f = evalStateT f sample
-
 main = do
-  ags <- parseArgsIO ArgsComplete arguments
-  let backup = Backup
-               {
-                 user = getRequiredArg ags "user",
-                 server = getRequiredArg ags "server",
-                 folder = getRequiredArg ags "folder",
-                 srcFolder = getRequiredArg ags "src",
-                 exclude = getRequiredArg ags "exclude",
-                 dryrun = gotArg ags "dryrun",
-                 numHourly = getRequiredArg ags "numHourly"
-               }
+  options <- cmdArgs opts
+  putStrLn (show options)
+  --checkOptions options
   statusf <- fmap (</> ".backup_status") getHomeDirectory
   --check if a backup is running already
   running <- fmap (elem "RUNNING".words) $ readFile statusf
   if not running
     then
       writeFile statusf "RUNNING" >>
-      fmap (==Okay) (evalStateT (exec runSync) backup) >>= \r ->
+      fmap (==Okay) (evalStateT (exec runSync) options) >>= \r
       writeFile statusf "DONE" >> return r
     else
       putStrLn "Already Running" >> return False
 
+--checkOptions 
 
 {-
 --delete oldest hour
@@ -101,40 +85,43 @@ runSync = do
       link = makeHardLinkCopy (fol 0) (fol 1)
 
   (chk <*> del <*> mvs <*> link) `at` Remote
-   <*> sync (fol 0) `at` Local
+   <*> syncAll (fol 0) `at` Local
    <*> touch (fol 0) `at` Remote
 
-sync dest = do
+syncAll dest = do
+  (s:sources) <- gets src
+  foldl' (\acc x -> acc <*> sync x dest) (sync s dest) sources
+
+sync src dest = do
   ex <- gets exclude
-  src <- gets srcFolder
   srvr <- gets server
   usr <- gets user
-  fol <- gets folder
+  fol <- gets bakFolder
   let cmd = "rsync -vaz --delete --delete-excluded --exclude-from="
             ++ ex ++ " " ++ addTrailingPathSeparator src ++ " "
             ++ usr ++ "@" ++ srvr ++ ":" ++ (fol </> dest)
   create cmd
 
 makeHardLinkCopy src dst = do
-  fol <- gets folder
+  fol <- gets bakFolder
   let cp = create $ "cp -al " ++ (fol </> src) ++ " " ++ (fol </> dst)
   cp `on` checkExists src
 
 touch name = do
-  fol <- gets folder
+  fol <- gets bakFolder
   create $ "touch " ++ (fol </> name)
 
 move src dest = do
-  fol <- gets folder
+  fol <- gets bakFolder
   let mv = create $ "mv -u " ++ (fol </> src) ++ " " ++ (fol </> dest)
   mv `on` checkExists src
 
 delete name = do
-  fol <- gets folder
+  fol <- gets bakFolder
   create $ "rm -rf " ++ (fol </> name)
 
 checkExists name = do
-  fol <- gets folder
+  fol <- gets bakFolder
   create $ "[ -e " ++ (fol </> name) ++ " ]"
 
 infixl 2 `at`
