@@ -98,7 +98,7 @@ sync src dest = do
   usr <- gets user
   fol <- gets bakFolder
   let cmd = "rsync -vaz --delete --delete-excluded --exclude-from="
-            ++ ex ++ " " ++ addTrailingPathSeparator src ++ " "
+            ++ ex ++ " " ++ dropTrailingPathSeparator src ++ " "
             ++ usr ++ "@" ++ srvr ++ ":" ++ (fol </> dest)
   create cmd
 
