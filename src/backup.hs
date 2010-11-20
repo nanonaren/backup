@@ -61,7 +61,7 @@ main = do
   if not running
     then
       writeFile statusf "RUNNING" >>
-      fmap (==Okay) (evalStateT (exec runSync) options) >>= \r
+      fmap (==Okay) (evalStateT (exec runSync) options) >>= \r ->
       writeFile statusf "DONE" >> return r
     else
       putStrLn "Already Running" >> return False
