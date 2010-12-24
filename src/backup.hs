@@ -27,6 +27,7 @@ data Options = Options
       bakFolder :: FilePath,
       src :: [FilePath],
       exclude :: FilePath,
+      statusFile :: FilePath,
       numHourly :: Int
     } deriving (Show,Data,Typeable)
 
@@ -39,6 +40,7 @@ opts = Options
     src = def &= help "Absolute path to source folder. Use this flag \
                         \multiple times for multiple folders" &= typDir,
     exclude = def &= help "Rsync excludes file" &= typFile,
+    statusFile = def &= help "Status file" &= typFile,
     numHourly = def &= help "Number of backups to keep" &= typ "NUM"
   } &= program "backup"
     &= summary "Clean and simple Rsync backup"
@@ -55,7 +57,7 @@ main = do
   options <- cmdArgs opts
   putStrLn (show options)
   --checkOptions options
-  statusf <- fmap (</> ".backup_status") getHomeDirectory
+  let statusf = statusFile options
   --check if a backup is running already
   running <- fmap (elem "RUNNING".words) $ readFile statusf
   if not running
