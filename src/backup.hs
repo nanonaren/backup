@@ -37,7 +37,7 @@ opts = Options
     server = def &= help "Server address" &= typ "ADDRESS",
     user = def &= help "Username at server" &= typ "NAME",
     bakFolder = def &= help "Absolute path to backup folder at server" &= typDir,
-    src = def &= help "Absolute path to source folder. Use this flag \
+                src = def &= help "Absolute path to source folder. Use this flag \
                         \multiple times for multiple folders" &= typDir,
     exclude = def &= help "Rsync excludes file" &= typFile,
     statusFile = def &= help "Status file" &= typFile,

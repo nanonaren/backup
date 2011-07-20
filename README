@@ -1,1 +1,19 @@
-A simple backup tool. See top of backup.hs file to see the backup method implemented
+Clean and simple Rsync backup
+
+backup [OPTIONS]
+
+Common flags:
+  -d --dryrun           Show the commands that will be executed
+     --server=ADDRESS   Server address
+  -u --user=NAME        Username at server
+  -b --bakfolder=DIR    Absolute path to backup folder at server
+     --src=DIR          Absolute path to source folder. Use this flag
+                        multiple times for multiple folders
+  -e --exclude=FILE     Rsync excludes file
+     --statusfile=FILE  Status file
+  -n --numhourly=NUM    Number of backups to keep
+  -? --help             Display help message
+  -V --version          Print version information
+
+Visit http://github.com/nanonaren for source.
+
